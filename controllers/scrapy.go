@@ -2,51 +2,73 @@ package controllers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"net/http"
 	URLtools "net/url"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
-type content struct {
-	ErrCode int
-	ErrMsg interface{},
+type Resp struct {
+	ErrCode    int
+	ErrMsg     interface{}
 	TotalCount int
-	PageIndex int
-	Data struct{
+	PageIndex  int
+	Data       struct {
 		LSJZList []Fund
 	}
 }
 
 type Fund struct {
-	FSRQ string
-	DWJZ float64
-	LJJZ float64
-	JZZZL float64
+	FSRQ  string
+	DWJZ  string
+	LJJZ  string
+	JZZZL string
 }
 
 var re = regexp.MustCompile(`{.*}`)
 
-func AutoScrapy(task map[string]struct{}, db *sql.DB, RWMu sync.RWMutex){
+func AutoScrapy(task map[string]struct{}, db *sql.DB, RWMu *sync.RWMutex) {
+	rsql := "CREATE TABLE IF NOT EXISTS %s (date DATE PRIMARY KEY, price DOUBLE, total_price DOUBLE, ratio DOUBLE)"
 	limit := make(chan struct{}, 10)
 
-	RWMu.RLock()
-	for invest, _ := range task {
+	for {
+		RWMu.RLock()
+		for invest := range task {
+			RWMu.RUnlock()
+			rsql = fmt.Sprintf(rsql, invest)
+			_, err := db.Exec(rsql)
+			if err != nil {
+				log.Println(err.Error())
+				continue
+			}
+			limit <- struct{}{}
+			go Auto(invest, task, limit, db, RWMu)
+
+			RWMu.RLock()
+		}
 		RWMu.RUnlock()
-		limit <- struct{]{}
-		go Auto(invest, task, limit, db, RWMu)
+		time.Sleep(10 * time.Second)
 	}
-	RWMu.RUnlock()
 }
 
-func Auto(invest string, task map[string]struct{}, ch chan struct{}, db *sql.DB, RWMu sync.RWMutex){
+func Auto(invest string, task map[string]struct{}, ch chan struct{}, db *sql.DB, RWMu *sync.RWMutex) {
 	taskLimit := make(chan struct{}, 50)
-	nowPage, totalPage := Scrapy(1, nil, db)
+	nowPage, totalPage := Scrapy(invest, 1, nil, db)
 
-	for ;nowPage <= totalPage; nowPage++ {
-		tackLimit <- struct{}{}
-		go Scrapy(nowPage, taskLimit, db)
+	if task == nil {
+		return
+	}
+
+	for ; nowPage <= totalPage; nowPage++ {
+		taskLimit <- struct{}{}
+		go Scrapy(invest, nowPage, taskLimit, db)
 	}
 
 	<-ch
@@ -55,7 +77,7 @@ func Auto(invest string, task map[string]struct{}, ch chan struct{}, db *sql.DB,
 	RWMu.Unlock()
 }
 
-func Scrapy(invest string, page int, ch chan struct{}, db *sql.DB)(int, int){
+func Scrapy(invest string, page int, ch chan struct{}, db *sql.DB) (int, int) {
 	result, index, total := get(invest, strconv.Itoa(page))
 	if result == nil {
 		if ch != nil {
@@ -66,9 +88,23 @@ func Scrapy(invest string, page int, ch chan struct{}, db *sql.DB)(int, int){
 
 	sql := fmt.Sprintf("INSERT INTO %s VALUES(?,?,?,?)", invest)
 	s, err := db.Prepare(sql)
+	if err != nil {
+		log.Println(err.Error())
+		return 0, 0
+	}
 	for _, v := range result {
-		_, err := s.Exec(v.FSRQ, v.DWJZ, v.LJJZ, v.JZZZL)
+		dwjz, err2 := strconv.ParseFloat(v.DWJZ, 64)
+		ljjz, err3 := strconv.ParseFloat(v.LJJZ, 64)
+		jzzzl, err4 := strconv.ParseFloat(v.JZZZL, 64)
+		if err2 != nil || err3 != nil || err4 != nil {
+			log.Println("Format string to float64 happend error")
+			continue
+		}
+		_, err := s.Exec(v.FSRQ, dwjz, ljjz, jzzzl)
 		if err != nil {
+			if !strings.Contains(err.Error(), "PRIMARY") {
+				log.Println(err.Error())
+			}
 			continue
 		}
 	}
@@ -81,15 +117,18 @@ func Scrapy(invest string, page int, ch chan struct{}, db *sql.DB)(int, int){
 	return index + 1, total / 20
 }
 
-func get(invest, page string)([]Fund, int, int){
+func get(invest, page string) ([]Fund, int, int) {
 	url := "http://api.fund.eastmoney.com/f10/lsjz"
-	headers = http.Header{}
+	headers := http.Header{
+		"User-Agent": []string{`Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.80 Safari/537.36`},
+		"Referer":    []string{`http://fundf10.eastmoney.com/jjjz_161725.html`},
+	}
 
-	timeStamp := strconv.FormatInt(time.Now.UnixNano(), 64)
+	timeStamp := strconv.FormatInt(time.Now().UnixNano(), 10)
 
 	params := URLtools.Values{}
-	params.Set("callback", "_" + timeStamp)
-	params.Set("fundCode", strigs.Replace(invest, "fund_", ""))
+	params.Set("callback", "_"+timeStamp)
+	params.Set("fundCode", strings.Replace(invest, "fund_", "", -1))
 	params.Set("pageIndex", page)
 	params.Set("pageSize", "20")
 	params.Set("startDate", "")
@@ -130,8 +169,8 @@ func get(invest, page string)([]Fund, int, int){
 		return nil, 0, 0
 	}
 
-	c := content{}
-	if err = json.UnMarshal(data, &c); err != nil {
+	c := Resp{}
+	if err = json.Unmarshal(data, &c); err != nil {
 		log.Println(err.Error())
 		return nil, 0, 0
 	}

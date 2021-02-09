@@ -1,0 +1,41 @@
+<div class="chart">
+	<canvas></canvas>
+	<br>
+	<br>
+	<p style="margin:0%; text-align: start; font-size: 18px;"><a
+			href="https://finance.sina.com.cn/roll/index.d.html?cid=56589&page=1" target="_blank"></a></p>
+	<br>
+	<textarea readonly; id="introduce">
+		黄点代表当前基金净值的平均值。
+		绿点代表当前基金净值的昨日值。
+		绿点离黄点远，投资就需要谨慎。
+		只适合价格上下波动的基金，
+		不适用一路涨涨涨！的牛基。
+	</textarea>
+</div>
+
+<div style="position: absolute; left: 63%; top:0%; height:calc(100% - 50px); border-left: 1px solid gray;"></div>
+
+<div class="input">
+	<p id="publickey" style="display:none">{{.PublicKey}}</p>
+	<select name="kind" id="kind">
+		<option value="fund">基金</option>
+	</select>
+	<input type="text" name="code" id="code" value="161725" placeholder="基金代码">
+	<button type="submit" onclick="submit()">查询</button>
+	<br />
+	<br />
+	<p class="errormsg"></p>
+	<table class="list">
+		<thead>
+			<tr>
+				<th>日期</th>
+				<th>单位净值</th>
+				<th>涨跌率</th>
+			</tr>
+		</thead>
+		<tbody>
+
+		</tbody>
+	</table>
+</div>
