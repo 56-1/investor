@@ -118,6 +118,7 @@ func (i *InvestController) Post() {
 	valid := validation.Validation{}
 	valid.Base64(d.Key, "key")
 	valid.Base64(d.Code, "code")
+	valid.MaxSize(d.Code, 8, "code length")
 	valid.Required(kind, "kind")
 
 	if valid.HasErrors() {
